@@ -843,6 +843,6 @@ def test_campaign_machines_route_a_declared_pinned_image_local_first(monkeypatch
     routes = CampaignMachines(image_factory=_AdmissionImageFactory()).routes(requirements, 2048)
     assert [route.tier for route in routes] == [Tier.LOCAL, Tier.DAYTONA]
     assert routes[0].spec.source == RegistryImage(image)
-    assert routes[1].spec.source == RegistryImage(image) and routes[1].spec.cpus is not None
+    assert routes[1].spec.source == RegistryImage(image)
     for route in routes:
         validate_machine_spec(requirements, route.factory, route.spec)

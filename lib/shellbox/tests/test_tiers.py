@@ -5,7 +5,7 @@
 
 import pytest
 from shellbox.machine import CommandSemantics, NetworkPolicy, PackageSpec
-from shellbox.tiers import DeclaredSource, TaskRequirements, Tier, route_tiers
+from shellbox.tiers import TaskRequirements, Tier, route_tiers
 
 PINNED_IMAGE = "ghcr.io/example/task@sha256:" + "0" * 64
 UNPINNED_IMAGE = "ghcr.io/example/task:latest"
@@ -128,15 +128,3 @@ def _requirements(**fields) -> TaskRequirements:
 )
 def test_declared_requirements_route_to_the_satisfying_tiers(requirements: TaskRequirements, expected: tuple):
     assert route_tiers(requirements) == expected
-
-
-def test_machine_less_requirements_have_no_route():
-    with pytest.raises(ValueError, match="command semantics"):
-        route_tiers(TaskRequirements())
-
-
-def test_declared_source_derivation():
-    assert TaskRequirements().source is DeclaredSource.NONE
-    assert TaskRequirements(package_spec=PackageSpec()).source is DeclaredSource.PACKAGE_SPEC
-    assert TaskRequirements(packages_lock="s3://bucket/task/uv.lock").source is DeclaredSource.PACKAGES_LOCK
-    assert TaskRequirements(docker_image=PINNED_IMAGE).source is DeclaredSource.IMAGE

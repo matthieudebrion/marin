@@ -197,16 +197,15 @@ def _source_task_prompt(row: dict, index: int, *, source_name: str, environment_
 def _tier_machine(
     requirements: EnvironmentRequirements, machines_by_tier: Mapping[str, dict], recorded: Tier | None
 ) -> dict | None:
-    """The cheapest registered tier's machine for the task's declared requirements.
+    """Return the cheapest registered tier serving the task, or no machine.
 
     The shellbox tier table orders the candidate tiers, cheapest first, and
     ``machines_by_tier`` holds the runtime settings of the tiers this deployment
     registers: a tier without an entry is not registered, so the next satisfying
     tier serves, and a task no registered tier satisfies binds no machine. The
-    task's recorded route tier — the tier whose ingest controls passed — starts the
-    ladder: the tiers below it failed the task's controls and never serve. A task
-    that declares the network capability binds ALLOW whatever its tier's template
-    says, since the router only admits tiers that serve ALLOW.
+    task's recorded route tier starts the ladder. A declared network capability
+    sets the selected machine's policy to ALLOW.
+
     """
     if requirements.command_semantics is None or not machines_by_tier:
         # A task without declared semantics is machine-less: the lowering binds no machine for it.

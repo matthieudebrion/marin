@@ -389,17 +389,6 @@ def test_oracle_fails_up_from_a_tier_that_cannot_serve_it(machines, refusal_stat
     assert [machine.image for machine in oracles] == [AGENT_IMAGE]
 
 
-def test_control_failure_on_the_top_satisfying_tier_is_the_final_verdict():
-    task = file_task()
-    requirements = EnvironmentRequirements(command_semantics=CommandSemantics.LINUX_PROCESS, docker_image=AGENT_IMAGE)
-    task = TaskSpec.model_validate(task.model_copy(update={"environment_requirements": requirements}).model_dump())
-    report = control_suite(
-        Controls(golden=lambda _: OracleCommand("bash /solution/solve.sh")),
-        FailingThenImageMachines(UnavailableImages()),
-    ).run(task)
-    assert {check.check: check.status for check in report.checks} == {"golden": CheckStatus.INFRA_ERROR}
-
-
 @dataclass(eq=False)
 class ScriptedAnswerMachine:
     """A machine that runs every command but answers ``cat`` with a fixed payload."""

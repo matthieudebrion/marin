@@ -255,11 +255,9 @@ class LocalGraderMachines:
         return {"backend": Backend.LOCAL.value, "python": DEFAULT_PYTHON_VERSION}
 
     def routes(self, environment: EnvironmentRequirements, memory_mb: int) -> tuple[MachineRoute, ...]:
-        """The single local candidate for declared packages or a digest-pinned image; no candidate otherwise.
+        """Return the local route for declared packages, a lock, or a pinned image.
 
-        ``memory_mb`` is advisory. An image machine stages the pinned registry
-        reference through the local image cache; an unpinned reference has no
-        candidate here because the staging could never reproduce it.
+        ``memory_mb`` is advisory; an unpinned image has no local route.
         """
         require_resolved_environment(environment)
         if environment.docker_image is not None:

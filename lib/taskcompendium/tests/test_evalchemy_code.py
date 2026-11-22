@@ -9,6 +9,7 @@ from functools import partial
 import pyarrow as pa
 import pyarrow.parquet as pq
 import pytest
+from finestore.rl.curation import TaskFormat
 from fray.current_client import set_current_client
 from fray.local_backend import LocalClient
 from shellbox.machine import PackageSpec
@@ -113,6 +114,7 @@ def test_python_publication_keeps_tests_private_and_expands_crux_directions(case
                 context,
                 str(root),
                 output,
+                declared_task_format=TaskFormat.TASKSPEC,
             )
         published = list(evaluation_cases(output))
     finally:

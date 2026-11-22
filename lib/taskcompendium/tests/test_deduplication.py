@@ -8,6 +8,7 @@ from dataclasses import replace
 
 import pyarrow.parquet as pq
 import pytest
+from finestore.rl.curation import TaskFormat
 from zephyr.context import ZephyrContext
 from zephyr.dataset import Dataset
 
@@ -90,6 +91,7 @@ def test_quick_drops_duplicates_across_files_before_export(tmp_path):
             str(tmp_path / "output"),
             mode=SourceProcessingMode.QUICK,
             canonical_source=recipe.name,
+            declared_task_format=TaskFormat.TASKSPEC,
         )
     root = tmp_path / "output"
     tasks = [

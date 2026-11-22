@@ -35,7 +35,7 @@ from pydantic import (
     model_validator,
 )
 from rigging.filesystem.path_validation import validate_relative_file_path, validate_relative_file_paths
-from shellbox.machine import Backend, PackageSpec, UnsupportedMachineSpec
+from shellbox.machine import Backend, MachineFactory, MachineSpec, PackageSpec, UnsupportedMachineSpec
 from shellbox.machine import CommandSemantics as CommandSemantics
 from shellbox.tiers import Tier
 from verifyit.candidate import candidate_spec

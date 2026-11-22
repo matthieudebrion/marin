@@ -6,9 +6,7 @@
 One table maps the requirements a task declares — command semantics, capabilities,
 network policy, and its image or package source — to the execution tiers that
 satisfy them, cheapest first: ShellSim (in-process), local bubblewrap, Daytona
-(shared quota). Atlas ingest tests a task's oracle and negative controls on the
-cheapest satisfying tier and fails up on control failure, recording the first tier
-where both pass as the task's route; RL runs each task on its recorded route tier.
+(shared quota). Atlas ingest records the task tier where its controls pass.
 A ``shell_simulator`` task may run on a ``linux_process`` tier, because its
 capabilities are a subset of Linux's; a ``linux_process`` task never runs on ShellSim.
 A spec that omits its capabilities routes by its declared source alone: the single
@@ -135,10 +133,9 @@ def _declared_source_route(requirements: TaskRequirements) -> tuple[Tier, ...]:
     """The declared-source route: the single tier the spec's declared source requires.
 
     A spec that omits its capabilities routes by its declared source alone, with the
-    full Linux capability set assumed — the route every published cohort took before
-    the tier table existed. Fail-up needs a task to declare what it actually
-    requires. A task with no declared source runs on the simulator's default
-    packages, or is unsupported.
+    full Linux capability set assumed. Fail-up needs a task to declare what it
+    actually requires. A task with no declared source runs on the simulator's
+    default packages, or is unsupported.
     """
     semantics = requirements.command_semantics
     assert semantics is not None
@@ -154,11 +151,7 @@ def _declared_source_route(requirements: TaskRequirements) -> tuple[Tier, ...]:
 
 
 def satisfies(definition: TierDefinition, requirements: TaskRequirements) -> bool:
-    """Whether one tier satisfies the declared requirements.
-
-    Mirrors what the tier's backend check rejects, without acquiring resources:
-    a refusal from a backend check is "tier does not satisfy", never an error.
-    """
+    """Whether one tier satisfies the declared requirements."""
     if requirements.command_semantics is None:
         raise ValueError("A task without declared command semantics has no machine to route")
     if not satisfies_semantics(definition.semantics, requirements.command_semantics):
@@ -181,8 +174,8 @@ def satisfies(definition: TierDefinition, requirements: TaskRequirements) -> boo
 def route_tiers(requirements: TaskRequirements) -> tuple[Tier, ...]:
     """The ordered tiers that satisfy the declared requirements, cheapest first.
 
-    Empty means no tier in the table satisfies the requirements: an unsupported
-    task, not an error. A spec that omits its capabilities routes by its declared
+    Empty means no tier in the table satisfies the declared requirements.
+    A spec that omits its capabilities routes by its declared
     source alone — the single tier that source requires, with the full Linux
     capability set assumed; no cheaper tier is tried. Callers gate machine-less
     tasks and resolve Docker build contexts before routing.

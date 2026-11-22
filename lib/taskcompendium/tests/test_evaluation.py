@@ -8,6 +8,7 @@ from dataclasses import replace
 import pyarrow as pa
 import pyarrow.parquet as pq
 import pytest
+from finestore.rl.curation import TaskFormat
 from fray.local_backend import LocalClient
 from zephyr.context import ZephyrContext
 from zephyr.stage_io import ZephyrWorkerError
@@ -95,7 +96,15 @@ def publish(corpus, tmp_path, item_builder=chat_item):
     client = LocalClient()
     try:
         with ZephyrContext(client=client, max_workers=1, chunk_storage_prefix=str(tmp_path / "chunks")) as context:
-            return publish_evaluation_corpus(recipe, protocol, item_builder, context, str(source), str(output))
+            return publish_evaluation_corpus(
+                recipe,
+                protocol,
+                item_builder,
+                context,
+                str(source),
+                str(output),
+                declared_task_format=TaskFormat.TASKSPEC,
+            )
     finally:
         client.shutdown()
 

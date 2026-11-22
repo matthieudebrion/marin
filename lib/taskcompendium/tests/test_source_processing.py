@@ -1501,7 +1501,8 @@ def test_backfill_leaves_unresolved_capabilities_not_stated(tmp_path):
     exported = [TaskSpec.model_validate_json(row["task_json"]) for row in parquet_rows(result.normalize_path)]
     for task in exported:
         assert task.environment_requirements.capabilities == ()
-        assert task.labels == {}
+        # The backfill stage wrote no label; the recorded route tier is the verification stage's.
+        assert not any(key.startswith("requirements.backfill") for key in task.labels)
     receipt = read_json(Path(result.manifest_path).parent / "requirements/manifest.json")
     assert receipt["counts"]["outcomes"]["not_stated"] == 2
     assert all(
@@ -1575,7 +1576,8 @@ def test_no_backfill_policy_skips_the_requirements_stage(tmp_path):
     assert not (output / "requirements").exists()
     assert "requirements" not in [phase["phase"] for phase in read_json(manifest["telemetry"])["phases"]]
     exported = [TaskSpec.model_validate_json(row["task_json"]) for row in parquet_rows(result.normalize_path)]
-    assert all(task.environment_requirements.capabilities == () and task.labels == {} for task in exported)
+    assert all(task.environment_requirements.capabilities == () for task in exported)
+    assert all(not any(key.startswith("requirements.backfill") for key in task.labels) for task in exported)
 
 
 def manifest_requirements(receipt: dict, output: Path) -> dict:
