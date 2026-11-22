@@ -77,6 +77,10 @@ message runs under the assistant-prefix harness. The `structure-closure` tasks o
 curation [task-selection artifact](task-curation.md#final-task-selection) end this way.
 Other tasks use `harness_by_dataset[task.source.dataset]` when configured, or
 `default_harness`, which defaults to Shellbox.
+A task that needs a machine uses `task_machine_by_dataset[task.source.dataset]`, or else the
+shellbox tier table: the cheapest tier in `task_machine_by_tier` that satisfies the task's
+declared requirements, where an absent entry marks a tier the deployment does not register and a
+declared `network` capability binds `allow`; without either, it fails validation.
 Image graders use the configured image verifier backend; package
 graders use the configured local verifier. The inventory artifact contains the
 task and private grader, so changing rollout resources or deadlines does not

@@ -213,6 +213,17 @@ class UnsupportedMachineSpec(ValueError):
     """The selected backend cannot create the requested machine."""
 
 
+def satisfies_semantics(tier_semantics: CommandSemantics, task_semantics: CommandSemantics) -> bool:
+    """Whether a tier providing ``tier_semantics`` runs a task declaring ``task_semantics``.
+
+    A ``shell_simulator`` task may run on a ``linux_process`` tier, because its capabilities are
+    a subset of Linux's; a ``linux_process`` task never runs on ShellSim.
+    """
+    if tier_semantics is task_semantics:
+        return True
+    return tier_semantics is CommandSemantics.LINUX_PROCESS and task_semantics is CommandSemantics.SHELL_SIMULATOR
+
+
 def check_execution_requirements(
     requirements: ExecutionRequirements,
     spec: MachineSpec,
@@ -226,7 +237,7 @@ def check_execution_requirements(
     Backends check their source and allocation features separately. This does not
     promise installed executables, available capacity or successful acquisition.
     """
-    if requirements.command_semantics != semantics:
+    if not satisfies_semantics(semantics, requirements.command_semantics):
         raise UnsupportedMachineSpec(f"The selected factory requires {semantics} semantics")
     unsupported = set(requirements.capabilities) - capabilities
     if unsupported:

@@ -12,7 +12,8 @@ from rolloutengine.validation import validate_spec
 from shellbox.backends.daytona.machine import DaytonaMachineFactory
 from shellbox.backends.local.machine import check_local_environment
 from shellbox.backends.shellsim.machine import ShellSimMachineFactory
-from shellbox.machine import Backend, ExecutionRequirements, Machine, MachineSpec
+from shellbox.machine import Backend, ExecutionRequirements, Machine, MachineSpec, NetworkPolicy, PackageSpec
+from shellbox.tiers import Tier
 from skyrl_gym.rollout_specs import is_shell_harness
 from skyrl_train.config.utils import get_default_config
 from skyrl_train.dataset.tasks import SourceTaskDataset
@@ -74,6 +75,121 @@ def test_a_dataset_machine_attaches_only_to_rows_that_need_one(tmp_path: Path):
     assert [spec.task_machine for spec in loaded] == [runtime, runtime, None]
     for spec in (loaded[0], loaded[2]):
         validate_spec(spec, {"shellsim": ShellSimMachineFactory()})
+
+
+def test_command_semantics_select_the_machine_for_a_mixed_dataset(tmp_path: Path):
+    simulated = text_task("simulated-task", source="mixed").model_copy(
+        update={"environment_requirements": SHELL_ENVIRONMENT}
+    )
+    linux = text_task("linux-task", source="mixed").model_copy(
+        update={"environment_requirements": NATIVE_ENVIRONMENT}
+    )
+    reply = text_task("reply-task", source="mixed")
+    shellsim, daytona = machine_runtime("shellsim"), machine_runtime("daytona")
+    loaded = _load(
+        tmp_path,
+        (simulated, linux, reply),
+        task_machine_by_tier={
+            Tier.SHELLSIM.value: shellsim.model_dump(),
+            Tier.DAYTONA.value: daytona.model_dump(),
+        },
+    )
+    assert [spec.task_machine for spec in loaded] == [shellsim, daytona, None]
+    for spec in loaded:
+        validate_spec(spec, {"shellsim": ShellSimMachineFactory(), **FACTORIES})
+
+
+def test_tier_routing_fails_up_to_the_next_registered_tier(tmp_path: Path):
+    """A simulator task that needs the network skips ShellSim; an unregistered cheaper tier is skipped too."""
+    networked_simulator = text_task("networked-simulator", source="mixed").model_copy(
+        update={
+            "environment_requirements": EnvironmentRequirements(
+                command_semantics=CommandSemantics.SHELL_SIMULATOR,
+                capabilities=("shell", "filesystem", "network"),
+                package_spec=PackageSpec(pypi_packages=("httpx==0.28.0",)),
+            )
+        }
+    )
+    native = text_task("native-task", source="mixed").model_copy(
+        update={
+            "environment_requirements": NATIVE_ENVIRONMENT.model_copy(
+                update={"capabilities": ("shell", "filesystem")}
+            )
+        }
+    )
+    shellsim, daytona, local = (machine_runtime(backend) for backend in ("shellsim", "daytona", "local"))
+    # The simulator's ladder skips ShellSim (it serves no ALLOW network) and binds local with the
+    # network its declared capability needs.
+    simulated_load = _load(
+        tmp_path,
+        (networked_simulator,),
+        task_machine_by_tier={
+            Tier.SHELLSIM.value: shellsim.model_dump(),
+            Tier.LOCAL.value: local.model_dump(),
+        },
+    )
+    # The native image task's ladder starts at local, which this deployment does not register,
+    # so Daytona serves.
+    native_load = _load(
+        tmp_path,
+        (native,),
+        task_machine_by_tier={
+            Tier.SHELLSIM.value: shellsim.model_dump(),
+            Tier.DAYTONA.value: daytona.model_dump(),
+        },
+    )
+    networked_local = local.model_copy(update={"network": NetworkPolicy.ALLOW})
+    assert [spec.task_machine for spec in simulated_load] == [networked_local]
+    assert [spec.task_machine for spec in native_load] == [daytona]
+    for spec in (*simulated_load, *native_load):
+        validate_spec(spec, {"shellsim": ShellSimMachineFactory(), **FACTORIES})
+
+
+def test_tier_routing_keeps_the_template_network_unless_the_task_declares_network(tmp_path: Path):
+    """A tier template keeps its own network policy; a declared network capability binds ALLOW."""
+    plain = text_task("plain", source="mixed").model_copy(
+        update={
+            "environment_requirements": NATIVE_ENVIRONMENT.model_copy(
+                update={"capabilities": ("shell", "filesystem")}
+            )
+        }
+    )
+    networked = text_task("networked", source="mixed").model_copy(
+        update={
+            "environment_requirements": NATIVE_ENVIRONMENT.model_copy(
+                update={"capabilities": ("shell", "filesystem", "network")}
+            )
+        }
+    )
+    local = machine_runtime("local")
+    loaded = _load(
+        tmp_path,
+        (plain, networked),
+        task_machine_by_tier={Tier.LOCAL.value: local.model_dump()},
+    )
+    assert [spec.task_machine.network for spec in loaded] == [NetworkPolicy.DENY, NetworkPolicy.ALLOW]
+
+
+def test_tier_routing_binds_no_machine_when_no_registered_tier_satisfies(tmp_path: Path):
+    """A lock-sourced Linux task is a local-tier task; without a registered local tier it binds none."""
+    lock_task = text_task("lock-task", source="mixed").model_copy(
+        update={
+            "environment_requirements": EnvironmentRequirements(
+                command_semantics=CommandSemantics.LINUX_PROCESS,
+                capabilities=("shell", "filesystem"),
+                packages_lock="s3://bucket/lock",
+            )
+        }
+    )
+    loaded = _load(
+        tmp_path,
+        (lock_task,),
+        task_machine_by_tier={
+            Tier.SHELLSIM.value: machine_runtime("shellsim").model_dump(),
+            Tier.DAYTONA.value: machine_runtime("daytona").model_dump(),
+        },
+    )
+    assert [spec.task_machine for spec in loaded] == [None]
 
 
 def test_dataset_harness_binding_keeps_harbor_and_assistant_prefix_execution(tmp_path: Path):

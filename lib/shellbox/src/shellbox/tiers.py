@@ -25,6 +25,7 @@ from shellbox.machine import (
     CommandSemantics,
     NetworkPolicy,
     PackageSpec,
+    satisfies_semantics,
 )
 
 
@@ -129,13 +130,6 @@ TIER_TABLE: tuple[TierDefinition, ...] = (
 """The ordered tier table, cheapest first: ShellSim, local bubblewrap, Daytona."""
 
 
-def _satisfies_semantics(tier_semantics: CommandSemantics, task_semantics: CommandSemantics) -> bool:
-    """A ``shell_simulator`` task may run on a ``linux_process`` tier; never the reverse."""
-    if tier_semantics is task_semantics:
-        return True
-    return tier_semantics is CommandSemantics.LINUX_PROCESS and task_semantics is CommandSemantics.SHELL_SIMULATOR
-
-
 def _declared_source_route(requirements: TaskRequirements) -> tuple[Tier, ...]:
     """The tier the declared source requires, as specs route today.
 
@@ -165,7 +159,7 @@ def satisfies(definition: TierDefinition, requirements: TaskRequirements) -> boo
     """
     if requirements.command_semantics is None:
         raise ValueError("A task without declared command semantics has no machine to route")
-    if not _satisfies_semantics(definition.semantics, requirements.command_semantics):
+    if not satisfies_semantics(definition.semantics, requirements.command_semantics):
         return False
     if not set(requirements.capabilities) <= definition.capabilities:
         return False

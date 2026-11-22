@@ -28,7 +28,10 @@ from taskcompendium.models import (
     VerifyitGrader,
     grades_with_judge,
 )
+from taskcompendium.runtime.environment import task_requirements
 from taskcompendium.runtime.shell import resolve_shell_tool
+from shellbox.machine import NetworkPolicy
+from shellbox.tiers import route_tiers
 from transformers import PreTrainedTokenizerBase
 
 from skyrl_train.dataset.dataset import PromptDataset, _prompt_token_count, dataset_num_proc
@@ -190,6 +193,35 @@ def _source_task_prompt(row: dict, index: int, *, source_name: str, environment_
     return {**session_parameters(lowered.task).extras, **task_prompt(lowered)}
 
 
+def _tier_machine(
+    requirements: EnvironmentRequirements, machines_by_tier: Mapping[str, dict]
+) -> dict | None:
+    """The cheapest registered tier's machine for the task's declared requirements.
+
+    The shellbox tier table orders the candidate tiers, cheapest first, and
+    ``machines_by_tier`` holds the runtime settings of the tiers this deployment
+    registers: a tier without an entry is not registered, so the next satisfying
+    tier serves, and a task no registered tier satisfies binds no machine. A task
+    that declares the network capability binds ALLOW whatever its tier's template
+    says, since the router only admits tiers that serve ALLOW.
+    """
+    if requirements.command_semantics is None or not machines_by_tier:
+        # A task without declared semantics is machine-less: today's lowering binds no machine.
+        return None
+    needs_network = "network" in requirements.capabilities
+    tier_requirements = task_requirements(
+        requirements, NetworkPolicy.ALLOW if needs_network else NetworkPolicy.DENY
+    )
+    for tier in route_tiers(tier_requirements):
+        machine = machines_by_tier.get(tier.value)
+        if machine is None:
+            continue
+        if needs_network and machine.get("network") != NetworkPolicy.ALLOW.value:
+            machine = {**machine, "network": NetworkPolicy.ALLOW.value}
+        return machine
+    return None
+
+
 def _canonical_task_prompt(row: dict, _index: int, *, environment_configs: Mapping[str, dict]) -> dict:
     """Bind runtime settings when a canonical TaskSpec enters the trainer."""
     task = TaskSpec.model_validate_json(row[TASK_SPEC_COLUMN])
@@ -206,6 +238,11 @@ def _canonical_task_prompt(row: dict, _index: int, *, environment_configs: Mappi
     if task.source.dataset in config["max_turns_by_dataset"]:
         session["max_turns"] = config["max_turns_by_dataset"][task.source.dataset]
     machine = config["task_machine_by_dataset"].get(task.source.dataset)
+    if machine is None:
+        # A dataset mixing shell-simulator and Linux tasks binds machines by the tier table. The
+        # binding has no default-config entry, so it appears in a native configuration only when a
+        # launch sets it.
+        machine = _tier_machine(task.environment_requirements, config.get("task_machine_by_tier", {}))
     task_machine = (
         MachineRuntimeSpec.model_validate(machine)
         if machine is not None and task_machine_reason(task) is not None
