@@ -79,6 +79,15 @@ class PreparedImage:
     source: RegistryImage | DockerfileSource
 
 
+DIGEST_PINNED_IMAGE = re.compile(r"[^\s]+@sha256:[0-9a-f]{64}")
+"""A registry reference that names its manifest by sha256 digest."""
+
+
+def is_digest_pinned_image(reference: str) -> bool:
+    """Whether the registry reference names its manifest by sha256 digest."""
+    return DIGEST_PINNED_IMAGE.fullmatch(reference) is not None
+
+
 def _digest_hex(digest: str) -> str:
     if re.fullmatch(SHA256_PATTERN, digest) is None:
         raise ValueError("Only sha256 OCI digests are supported")

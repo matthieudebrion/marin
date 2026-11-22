@@ -37,7 +37,7 @@ from shellbox.backends.local.disk import LocalDisk, LocalDiskPool
 from shellbox.backends.local.images import PreparedLocalImage, cached_local_image, prepare_local_image
 from shellbox.backends.local.python_environment import DEFAULT_PYTHON_VERSION, resolve_python_environment
 from shellbox.backends.local.transfers import unpack_local_archive
-from shellbox.image import PreparedImage, RegistryImage, process_image_cache
+from shellbox.image import PreparedImage, RegistryImage, is_digest_pinned_image, process_image_cache
 from shellbox.machine import (
     DEFAULT_MACHINE_OUTPUT_LIMIT_BYTES,
     LINUX_PROCESS_CAPABILITIES,
@@ -1222,10 +1222,7 @@ def _check_spec(
         raise UnsupportedMachineSpec("The local backend does not provide GPU allocations")
     if spec.memory_mb is not None and spec.memory_mb <= 0:
         raise ValueError("Local memory_mb must be positive")
-    if (
-        isinstance(spec.source, RegistryImage)
-        and re.fullmatch(r"[^\s]+@sha256:[0-9a-f]{64}", spec.source.reference) is None
-    ):
+    if isinstance(spec.source, RegistryImage) and not is_digest_pinned_image(spec.source.reference):
         raise UnsupportedMachineSpec("Local registry images must be pinned by sha256 digest")
     return spec.source
 
