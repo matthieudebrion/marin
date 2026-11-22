@@ -25,13 +25,14 @@ from taskcompendium.models import (
     ConversationInput,
     EnvironmentRequirements,
     ResourceGroups,
+    ROUTE_TIER_LABEL,
     ScriptGrader,
     Source,
     TextMessage,
 )
 from taskcompendium.pipeline.models import RawRow
 from taskcompendium.runtime.resources import inline_resource
-from tests.cpu.task_specs import SHELL_ENVIRONMENT, machine_runtime, text_task
+from tests.cpu.task_specs import NATIVE_ENVIRONMENT, SHELL_ENVIRONMENT, machine_runtime, text_task
 from tokenizers import Tokenizer, models
 from transformers import PreTrainedTokenizerFast
 
@@ -190,6 +191,51 @@ def test_tier_routing_binds_no_machine_when_no_registered_tier_satisfies(tmp_pat
         },
     )
     assert [spec.task_machine for spec in loaded] == [None]
+
+
+def test_recorded_route_tier_starts_the_ladder(tmp_path: Path):
+    """A task routes to its recorded tier even when a cheaper tier satisfies the requirements."""
+    task = text_task("routed", source="mixed").model_copy(
+        update={
+            "environment_requirements": EnvironmentRequirements(
+                command_semantics=CommandSemantics.LINUX_PROCESS,
+                capabilities=("shell", "filesystem"),
+                docker_image="fixture@sha256:" + "0" * 64,
+            ),
+            "labels": {ROUTE_TIER_LABEL: Tier.LOCAL.value},
+        }
+    )
+    shellsim, local = machine_runtime("shellsim"), machine_runtime("local")
+    loaded = _load(
+        tmp_path,
+        (task,),
+        task_machine_by_tier={
+            Tier.SHELLSIM.value: shellsim.model_dump(),
+            Tier.LOCAL.value: local.model_dump(),
+        },
+    )
+    assert [spec.task_machine for spec in loaded] == [local]
+
+
+def test_recorded_route_tier_fails_up_when_it_is_not_registered(tmp_path: Path):
+    """A recorded tier the deployment does not register sends the task to the next satisfying tier."""
+    task = text_task("routed", source="mixed").model_copy(
+        update={
+            "environment_requirements": EnvironmentRequirements(
+                command_semantics=CommandSemantics.LINUX_PROCESS,
+                capabilities=("shell", "filesystem"),
+                docker_image="fixture@sha256:" + "0" * 64,
+            ),
+            "labels": {ROUTE_TIER_LABEL: Tier.LOCAL.value},
+        }
+    )
+    daytona = machine_runtime("daytona")
+    loaded = _load(
+        tmp_path,
+        (task,),
+        task_machine_by_tier={Tier.DAYTONA.value: daytona.model_dump()},
+    )
+    assert [spec.task_machine for spec in loaded] == [daytona]
 
 
 def test_dataset_harness_binding_keeps_harbor_and_assistant_prefix_execution(tmp_path: Path):

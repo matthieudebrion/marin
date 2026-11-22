@@ -21,6 +21,7 @@ from shellbox.machine import (
     ExecutionRequirements,
     ExitReason,
     MachineSpec,
+    PackageSpec,
     Result,
     UnsupportedMachineSpec,
 )
@@ -291,10 +292,10 @@ def simulator_task(task: TaskSpec) -> TaskSpec:
 
 @pytest.mark.asyncio
 async def test_agent_machine_rejects_incompatible_command_semantics_before_start(executable_task):
-    machines = GradingMachines()
-    factory = ShellFactory(machines, MachineSpec(DockerImage(IMAGE)), {}, 1, 1024)
+    machines = GradingMachines(backend=Backend.SHELLSIM)
+    factory = ShellFactory(machines, MachineSpec(PackageSpec()), {}, 1, 1024)
     with pytest.raises(UnsupportedMachineSpec):
-        await factory.create(simulator_task(executable_task))
+        await factory.create(executable_task)
     assert not machines.machines
 
 

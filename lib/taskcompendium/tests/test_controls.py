@@ -376,12 +376,14 @@ def test_oracle_fails_up_from_a_tier_that_cannot_serve_it(machines, refusal_stat
     )
     assert {check.check: check.status for check in report.checks} == {"golden": PASS}
     assert report.route_tier == "daytona"
-    # The task machine's ladder fails up; the grader machine's ladder serves where it can.
-    assert [(verdict.role.value, verdict.tier, verdict.status.value) for verdict in report.verdicts] == [
+    # The task tier's verdict lands when its oracle's submission passes the control; the
+    # grader machine's ladder serves where it can.
+    assert [(verdict.role.value, verdict.tier.value, verdict.status.value) for verdict in report.verdicts] == [
         ("task", "shellsim", refusal_status),
-        ("task", "daytona", "pass"),
+        ("task", "daytona", "skipped"),
         *((verifier_refusal,) if verifier_refusal is not None else ()),
         ("verifier", "daytona", "pass"),
+        ("task", "daytona", "pass"),
     ]
     oracles = [machine for machine in images.created if "/solution/solve.sh" in machine.uploads]
     assert [machine.image for machine in oracles] == [AGENT_IMAGE]
@@ -396,6 +398,127 @@ def test_control_failure_on_the_top_satisfying_tier_is_the_final_verdict():
         FailingThenImageMachines(UnavailableImages()),
     ).run(task)
     assert {check.check: check.status for check in report.checks} == {"golden": CheckStatus.INFRA_ERROR}
+
+
+@dataclass(eq=False)
+class ScriptedAnswerMachine:
+    """A machine that runs every command but answers ``cat`` with a fixed payload."""
+
+    answer: bytes
+
+    async def run(self, command: Command) -> Result:
+        if command.argv[:1] == ("cat",):
+            return Result(0, self.answer, b"", False, False, ExitReason.EXITED)
+        return Result(0, b"", b"", False, False, ExitReason.EXITED)
+
+    async def upload(self, source, target) -> None:
+        return
+
+    async def download(self, source, target) -> None:
+        raise RuntimeError("No files exist on this machine")
+
+    async def close(self) -> None:
+        return
+
+
+@dataclass(eq=False)
+class ScriptedAnswerFactory:
+    """A machine factory whose machines answer the oracle with ``answer``."""
+
+    answer: bytes
+    backend: Backend = Backend.DAYTONA
+
+    def check_environment(self, requirements, spec) -> None:
+        return
+
+    async def create(self, spec: MachineSpec) -> ScriptedAnswerMachine:
+        return ScriptedAnswerMachine(self.answer)
+
+
+class WrongThenRightAnswerMachines(FixtureGradingMachines):
+    """A task ladder whose cheapest tier's oracle submits a wrong answer and whose next tier passes."""
+
+    def routes(self, environment: EnvironmentRequirements, memory_mb: int) -> tuple[MachineRoute, ...]:
+        routes = super().routes(environment, memory_mb)
+        if environment.docker_image != AGENT_IMAGE:
+            return routes
+        wrong = MachineRoute(
+            Tier.SHELLSIM, ScriptedAnswerFactory(b"wrong\n"), MachineSpec(PackageSpec(), memory_mb=memory_mb)
+        )
+        right = MachineRoute(
+            Tier.DAYTONA, ScriptedAnswerFactory(b"7\n"), MachineSpec(PackageSpec(), memory_mb=memory_mb)
+        )
+        return (wrong, right)
+
+
+def test_oracle_fails_up_when_its_submission_fails_grading():
+    """An oracle that runs cleanly but submits a wrong answer fails up to the next task tier."""
+    task = answer_task()
+    requirements = EnvironmentRequirements(command_semantics=CommandSemantics.LINUX_PROCESS, docker_image=AGENT_IMAGE)
+    task = TaskSpec.model_validate(task.model_copy(update={"environment_requirements": requirements}).model_dump())
+    report = control_suite(
+        Controls(golden=lambda _: OracleCommand("true", answer_file="answer.out")),
+        WrongThenRightAnswerMachines(RecordingImages()),
+    ).run(task)
+    assert {check.check: check.status for check in report.checks} == {"golden": PASS}
+    assert report.route_tier == "daytona"
+    assert [(verdict.role.value, verdict.tier.value, verdict.status.value) for verdict in report.verdicts] == [
+        ("task", "shellsim", "skipped"),
+        ("verifier", "daytona", "fail"),
+        ("task", "shellsim", "fail"),
+        ("task", "daytona", "skipped"),
+        ("verifier", "daytona", "pass"),
+        ("task", "daytona", "pass"),
+    ]
+
+
+@dataclass(eq=False)
+class RefusingAtAcquisitionFactory:
+    """An image factory that passes admission but refuses when acquiring the machine."""
+
+    backend: Backend = Backend.DAYTONA
+
+    def check_environment(self, requirements, spec) -> None:
+        return
+
+    async def create(self, spec: MachineSpec) -> Machine:
+        raise UnsupportedMachineSpec("Only numeric root image users are supported")
+
+
+class RefusingThenServingMachines(FixtureGradingMachines):
+    """A verifier ladder whose cheapest tier refuses at acquisition and whose next tier serves."""
+
+    def routes(self, environment: EnvironmentRequirements, memory_mb: int) -> tuple[MachineRoute, ...]:
+        if environment.docker_image == AGENT_IMAGE:
+            return (
+                MachineRoute(
+                    Tier.DAYTONA, ScriptedAnswerFactory(b"7\n"), MachineSpec(PackageSpec(), memory_mb=memory_mb)
+                ),
+            )
+        refused = MachineRoute(
+            Tier.LOCAL,
+            RefusingAtAcquisitionFactory(),
+            MachineSpec(DockerImage(environment.docker_image), memory_mb=memory_mb),
+        )
+        return (refused, *super().routes(environment, memory_mb))
+
+
+def test_verifier_refusal_at_acquisition_fails_up_to_the_next_tier():
+    """A backend that refuses only when acquiring the machine is a tier verdict, not an unsupported task."""
+    task = answer_task()
+    requirements = EnvironmentRequirements(command_semantics=CommandSemantics.LINUX_PROCESS, docker_image=AGENT_IMAGE)
+    task = TaskSpec.model_validate(task.model_copy(update={"environment_requirements": requirements}).model_dump())
+    report = control_suite(
+        Controls(golden=lambda _: OracleCommand("true", answer_file="answer.out")),
+        RefusingThenServingMachines(RecordingImages()),
+    ).run(task)
+    assert {check.check: check.status for check in report.checks} == {"golden": PASS}
+    assert [(verdict.role.value, verdict.tier.value, verdict.status.value) for verdict in report.verdicts] == [
+        ("task", "daytona", "skipped"),
+        ("verifier", "local", "unsupported"),
+        ("verifier", "daytona", "pass"),
+        ("task", "daytona", "pass"),
+    ]
 
 
 def test_local_oracle_and_grader_setup_run_without_changing_host_user(local_machine_environment):

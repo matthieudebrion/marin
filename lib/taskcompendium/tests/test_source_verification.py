@@ -12,13 +12,14 @@ import pyarrow as pa
 import pyarrow.parquet as pq
 import pytest
 from rigging.filesystem.storage_path import StoragePath
+from shellbox.tiers import Tier
 from verifyit.spec import SchemaFormat
 from zephyr.context import ZephyrContext
 from zephyr.dataset import Dataset
 
-from taskcompendium.convert.answers import json_schema_task
+from taskcompendium.convert.answers import json_schema_task, numeric_answer_task
 from taskcompendium.grading_result import GradeResult, GradingFailure, Outcome
-from taskcompendium.models import Source, TaskSpec
+from taskcompendium.models import ROUTE_TIER_LABEL, Source, TaskSpec
 from taskcompendium.pipeline.audit_schema import TASK_SCHEMA
 from taskcompendium.pipeline.controls import control_suite
 from taskcompendium.pipeline.execution_telemetry import PhaseTelemetry
@@ -29,6 +30,8 @@ from taskcompendium.pipeline.models import (
     Controls,
     GraderReadiness,
     RawRow,
+    TierRole,
+    TierVerdict,
     VerificationReport,
 )
 from taskcompendium.pipeline.source_verification import (
@@ -43,6 +46,7 @@ from taskcompendium.pipeline.source_verification import (
     gate_source_row,
     merge_samples,
     sample_result_checks,
+    sample_result_route,
     sample_rows,
     saved_trials,
     source_verification_report,
@@ -58,6 +62,8 @@ OBJECT_SCHEMA = {"type": "object"}
 
 # A JSON schema grader has no reference instance, so these controls grade an empty submission.
 SCHEMA_CONTROLS = Controls()
+
+ROW = RawRow("task", Source(dataset="fixture", revision="1", row="0", importer_revision="1"), {})
 
 
 def schema_task(task_id: str, schema: dict) -> TaskSpec:
@@ -330,6 +336,51 @@ def test_defective_task_row_is_rejected_when_its_source_passes():
     assert gated["filter_status"] == "reject"
     assert gated["filter_reasons"] == ["check:empty"]
     assert gated["grader_readiness"] == GraderReadiness.READY
+
+
+def test_a_checked_task_records_its_route_tier_on_the_gated_row():
+    task = numeric_answer_task(ROW, prompt="What is 3 + 4?", answer="7", tolerance_abs=0, tolerance_rel=0)
+    checked = SampleResult(
+        task_id=task.id,
+        source=task.source,
+        trials=[
+            VerificationTrial(
+                attempt=0,
+                status=CheckStatus.PASS,
+                checks=[CheckResult(check="golden", status=CheckStatus.PASS, detail="graded: reward=1.0")],
+                rollouts=(),
+                verdicts=(TierVerdict(role=TierRole.TASK, tier=Tier.LOCAL, status=CheckStatus.PASS, detail="passed"),),
+                route_tier=Tier.LOCAL,
+            )
+        ],
+    )
+    assert sample_result_route(checked) is Tier.LOCAL
+    kept = {
+        "task_id": task.id,
+        "task_json": task.model_dump_json(),
+        "labels": {},
+        "filter_status": "keep",
+        "filter_reasons": [],
+        "grader_readiness": "unverified",
+    }
+    gated = gate_source_row(
+        kept,
+        status=SourceVerificationStatus.PASSED,
+        results={task.id: sample_result_checks(checked)},
+        route_tiers={task.id: sample_result_route(checked)},
+    )
+    # The route rides the row's labels column; the task spec is unchanged so the
+    # oracle-filter integrity check at export still matches.
+    assert gated["labels"] == {ROUTE_TIER_LABEL: "local"}
+    assert TaskSpec.model_validate_json(gated["task_json"]).labels == {}
+    # A row the controls never checked records no route.
+    untouched = gate_source_row(
+        {**kept, "task_id": "unchecked"},
+        status=SourceVerificationStatus.PASSED,
+        results={task.id: sample_result_checks(checked)},
+        route_tiers={task.id: Tier.LOCAL},
+    )
+    assert "labels" not in untouched or ROUTE_TIER_LABEL not in dict(untouched["labels"] or ())
 
 
 def test_sample_is_independent_of_partitions_and_ignores_rejected_rows():

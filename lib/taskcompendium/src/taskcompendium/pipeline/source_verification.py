@@ -28,7 +28,7 @@ from zephyr.readers import load_parquet
 from zephyr.writers import write_parquet_file
 
 from taskcompendium.identity import canonical_sha256, task_spec_sha256
-from taskcompendium.models import Source, TaskSpec
+from taskcompendium.models import ROUTE_TIER_LABEL, Source, TaskSpec
 from taskcompendium.pipeline.execution_telemetry import PhaseTelemetry, execute_phase
 from taskcompendium.pipeline.fingerprints import callable_identity
 from taskcompendium.pipeline.models import (
@@ -267,6 +267,14 @@ def sample_result_checks(result: SampleResult) -> list[CheckResult]:
     ]
 
 
+def sample_result_route(result: SampleResult) -> Tier | None:
+    """The route tier a checked task recorded: the passing trial's task tier."""
+    for trial in (*result.trials, *(previous.trial for previous in result.previous_trials)):
+        if trial.status is CheckStatus.PASS and trial.route_tier is not None:
+            return trial.route_tier
+    return None
+
+
 def _trial_status(checks: list[CheckResult]) -> CheckStatus:
     statuses = {check.status for check in checks}
     if CheckStatus.FAIL in statuses:
@@ -473,6 +481,7 @@ def gate_source_row(
     *,
     status: SourceVerificationStatus,
     results: dict[str, list[CheckResult]],
+    route_tiers: Mapping[str, Tier] | None = None,
 ) -> dict[str, Any]:
     if row["task_id"] in results:
         checks = results[row["task_id"]]
@@ -484,6 +493,15 @@ def gate_source_row(
         failed = [f"check:{check.check}" for check in checks if check.status in REJECTING_CHECK_STATUSES]
         if failed:
             row = {**row, "filter_status": "reject", "filter_reasons": [*row["filter_reasons"], *sorted(set(failed))]}
+    route = None if route_tiers is None else route_tiers.get(row["task_id"])
+    if route is not None and is_accepted(row):
+        # The recorded route tier rides the row's labels column: mutating the task here
+        # would trip the oracle-filter integrity check at export, which merges the
+        # label into the task's own labels after admission.
+        row = {
+            **row,
+            "labels": {**dict(row.get("labels") or ()), ROUTE_TIER_LABEL: route.value},
+        }
     if not is_accepted(row):
         return row
     if status == SourceVerificationStatus.VALIDATED:
@@ -682,13 +700,14 @@ def _gate_with_previous(
     status: SourceVerificationStatus,
     results: dict[str, list[CheckResult]],
     previous: dict[str, dict[str, list[CheckResult]]],
+    route_tiers: Mapping[str, Tier],
 ) -> dict[str, Any]:
     if row["task_id"] not in results and row["task_id"] in previous and is_accepted(row):
         digest = task_spec_sha256(TaskSpec.model_validate_json(row["task_json"]))
         checks = previous[row["task_id"]].get(digest)
         if checks is not None:
-            return gate_source_row(row, status=status, results={row["task_id"]: checks})
-    return gate_source_row(row, status=status, results=results)
+            return gate_source_row(row, status=status, results={row["task_id"]: checks}, route_tiers=route_tiers)
+    return gate_source_row(row, status=status, results=results, route_tiers=route_tiers)
 
 
 def _gate_rows(
@@ -711,6 +730,7 @@ def _gate_rows(
         ]
         if any(check.status in REJECTING_CHECK_STATUSES for check in checks):
             previous.setdefault(saved.evidence.task_id, {}).setdefault(saved.evidence.task_sha256, []).extend(checks)
+    route_tiers = {result.task_id: route for result in results if (route := sample_result_route(result)) is not None}
     result = execute_phase(
         run.context,
         Dataset.from_files(run.inputs)
@@ -721,6 +741,7 @@ def _gate_rows(
                 status=decision.status,
                 results={result.task_id: sample_result_checks(result) for result in results},
                 previous=previous,
+                route_tiers=route_tiers,
             )
         )
         .map_shard(partial(write_filtered_shard, output=run.output)),

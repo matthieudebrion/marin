@@ -61,6 +61,8 @@ from taskcompendium.integrity import MultiSweDeliveryContract, RootDeliveryContr
 
 SCHEMA_VERSION = "0.30"
 DOCKER_IMAGE_PATTERN = r"^[^\s@]+@sha256:[0-9a-f]{64}$"
+ROUTE_TIER_LABEL = "machine.route_tier"
+"""The task label holding the route tier the task's ingest controls recorded."""
 TOOL_ARGUMENTS_OBJECT_ERROR = "Tool arguments must be a JSON object"
 
 

@@ -5,12 +5,8 @@ import asyncio
 import json
 import os
 import shutil
-<<<<<<< HEAD
 import sys
-from dataclasses import replace
-=======
 from dataclasses import dataclass, replace
->>>>>>> 4025cccfad ([curation] Stage digest-pinned images on the local tier and harden the ladder)
 from pathlib import Path, PurePosixPath
 from typing import cast
 
@@ -39,12 +35,8 @@ from shellbox.machine import (
 from shellbox.tiers import Tier
 from taskcompendium.models import CommandSemantics, EnvironmentRequirements
 from taskcompendium.pipeline.inputs import SourceFormat
-<<<<<<< HEAD
 from taskcompendium.pipeline.source_processing import SourceProcessingMode
-from taskcompendium.runtime.environment import prepare_machine_spec
-=======
 from taskcompendium.runtime.environment import prepare_machine_spec, validate_machine_spec
->>>>>>> 4025cccfad ([curation] Stage digest-pinned images on the local tier and harden the ladder)
 from taskcompendium.runtime.local import LocalRuntime, local_runtime
 from zephyr.readers import load_parquet
 
@@ -757,7 +749,6 @@ def test_full_campaign_requires_qa_transport_availability(tmp_path, monkeypatch,
     assert recovered["sources"][0]["path"] != outcome["path"]
 
 
-<<<<<<< HEAD
 def test_mutable_decontamination_receipt_cannot_plan_a_reviewed_campaign(tmp_path, catalog):
     dataset = math500().dataset
     receipt = decontamination_evidence(dataset.name, dataset.revision, 1).model_dump(mode="json")
@@ -815,7 +806,8 @@ def test_quick_selection_does_not_require_admission_for_unrelated_sources(tmp_pa
     monkeypatch.setattr(source_catalog, "all_sources", driver.all_sources)
     monkeypatch.setattr(driver, "runnable_sources", source_catalog.runnable_sources)
     assert driver._selected_sources((source.name,), SourceProcessingMode.QUICK) == {source.name: source}
-=======
+
+
 @dataclass(eq=False)
 class _AdmissionLocalFactory:
     """The local factory's admission checks without constructing a Linux sandbox."""
@@ -842,7 +834,6 @@ class _AdmissionImageFactory:
 
 def test_campaign_machines_route_a_declared_pinned_image_local_first(monkeypatch):
     monkeypatch.setattr("taskcompendium.runtime.local.local_factory", _admission_local_factory)
-    monkeypatch.setattr("taskcompendium.runtime.local.local_factory", _admission_local_factory)
     image = "ghcr.io/example/task@sha256:" + "0" * 64
     requirements = EnvironmentRequirements(
         command_semantics=CommandSemantics.LINUX_PROCESS,
@@ -855,4 +846,3 @@ def test_campaign_machines_route_a_declared_pinned_image_local_first(monkeypatch
     assert routes[1].spec.source == RegistryImage(image) and routes[1].spec.cpus is not None
     for route in routes:
         validate_machine_spec(requirements, route.factory, route.spec)
->>>>>>> 4025cccfad ([curation] Stage digest-pinned images on the local tier and harden the ladder)

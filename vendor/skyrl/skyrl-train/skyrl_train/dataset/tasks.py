@@ -21,6 +21,7 @@ from skyrl_gym.source_task import session_parameters, source_task
 from taskcompendium.models import (
     EnvironmentRequirements,
     NoGrader,
+    ROUTE_TIER_LABEL,
     ScriptGrader,
     Source,
     TaskSpec,
@@ -30,8 +31,8 @@ from taskcompendium.models import (
 )
 from taskcompendium.runtime.environment import task_requirements
 from taskcompendium.runtime.shell import resolve_shell_tool
-from shellbox.machine import NetworkPolicy
-from shellbox.tiers import route_tiers
+from shellbox.machine import NETWORK_CAPABILITY, NetworkPolicy
+from shellbox.tiers import Tier, route_tiers
 from transformers import PreTrainedTokenizerBase
 
 from skyrl_train.dataset.dataset import PromptDataset, _prompt_token_count, dataset_num_proc
@@ -194,25 +195,30 @@ def _source_task_prompt(row: dict, index: int, *, source_name: str, environment_
 
 
 def _tier_machine(
-    requirements: EnvironmentRequirements, machines_by_tier: Mapping[str, dict]
+    requirements: EnvironmentRequirements, machines_by_tier: Mapping[str, dict], recorded: Tier | None
 ) -> dict | None:
     """The cheapest registered tier's machine for the task's declared requirements.
 
     The shellbox tier table orders the candidate tiers, cheapest first, and
     ``machines_by_tier`` holds the runtime settings of the tiers this deployment
     registers: a tier without an entry is not registered, so the next satisfying
-    tier serves, and a task no registered tier satisfies binds no machine. A task
+    tier serves, and a task no registered tier satisfies binds no machine. The
+    task's recorded route tier — the tier whose ingest controls passed — starts the
+    ladder: the tiers below it failed the task's controls and never serve. A task
     that declares the network capability binds ALLOW whatever its tier's template
     says, since the router only admits tiers that serve ALLOW.
     """
     if requirements.command_semantics is None or not machines_by_tier:
         # A task without declared semantics is machine-less: the lowering binds no machine for it.
         return None
-    needs_network = "network" in requirements.capabilities
+    needs_network = NETWORK_CAPABILITY in requirements.capabilities
     tier_requirements = task_requirements(
         requirements, NetworkPolicy.ALLOW if needs_network else NetworkPolicy.DENY
     )
-    for tier in route_tiers(tier_requirements):
+    ladder = route_tiers(tier_requirements)
+    if recorded is not None and recorded in ladder:
+        ladder = ladder[ladder.index(recorded) :]
+    for tier in ladder:
         machine = machines_by_tier.get(tier.value)
         if machine is None:
             continue
@@ -242,7 +248,12 @@ def _canonical_task_prompt(row: dict, _index: int, *, environment_configs: Mappi
         # A dataset mixing shell-simulator and Linux tasks binds machines by the tier table. The
         # binding has no default-config entry, so it appears in a native configuration only when a
         # launch sets it.
-        machine = _tier_machine(task.environment_requirements, config.get("task_machine_by_tier", {}))
+        recorded = task.labels.get(ROUTE_TIER_LABEL)
+        machine = _tier_machine(
+            task.environment_requirements,
+            config.get("task_machine_by_tier", {}),
+            None if recorded is None else Tier(recorded),
+        )
     task_machine = (
         MachineRuntimeSpec.model_validate(machine)
         if machine is not None and task_machine_reason(task) is not None

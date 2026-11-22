@@ -32,7 +32,14 @@ from taskcompendium.grading_environment import (
     shared_integrity_issue,
 )
 from taskcompendium.identity import canonical_sha256
-from taskcompendium.models import Grader, NoGrader, TaskSpec, VerifyitGrader, grades_in_process
+from taskcompendium.models import (
+    ROUTE_TIER_LABEL,
+    Grader,
+    NoGrader,
+    TaskSpec,
+    VerifyitGrader,
+    grades_in_process,
+)
 from taskcompendium.pipeline.audit_schema import (
     IDENTITY_FIELDS,
     NORMALIZED_COLUMNS,
@@ -702,6 +709,16 @@ def _export_row(
 ) -> dict[str, Any]:
     """Admit one checked audit row and carry its raw identity in place of the raw payload no view publishes."""
     admitted = _admit(row, verification=verification, oracle_filter=oracle_filter, source_context=source_context)
+    # The recorded route tier rides the row's labels past the oracle-filter integrity check,
+    # then joins the task's own labels so every downstream reader sees it.
+    labels = dict(row.get("labels") or ())
+    route = labels.pop(ROUTE_TIER_LABEL, None)
+    if route is not None:
+        task = TaskSpec.model_validate_json(admitted["task_json"])
+        admitted = {
+            **admitted,
+            "task_json": task.model_copy(update={"labels": {**task.labels, ROUTE_TIER_LABEL: route}}).model_dump_json(),
+        }
     raw = json.loads(admitted.pop("raw_json"))
     return {**admitted, **{name: raw[name] for name, _ in IDENTITY_FIELDS[1:]}}
 
