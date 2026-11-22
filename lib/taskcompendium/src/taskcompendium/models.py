@@ -37,6 +37,7 @@ from pydantic import (
 from rigging.filesystem.path_validation import validate_relative_file_path, validate_relative_file_paths
 from shellbox.machine import Backend, PackageSpec, UnsupportedMachineSpec
 from shellbox.machine import CommandSemantics as CommandSemantics
+from shellbox.tiers import Tier
 from verifyit.candidate import candidate_spec
 from verifyit.grade import InvalidTask
 from verifyit.json_objects import unique_object
@@ -477,6 +478,15 @@ def require_resolved_environment(requirements: EnvironmentRequirements) -> None:
     """Reject an unbuilt recipe before choosing or creating an execution environment."""
     if requirements.docker_build is not None:
         raise UnsupportedMachineSpec("Unresolved Docker build context must be built and pinned before execution")
+
+
+@dataclass(frozen=True)
+class MachineRoute:
+    """One tier candidate for an environment: its route tier, factory and machine specification."""
+
+    tier: Tier
+    factory: MachineFactory
+    spec: MachineSpec
 
 
 GRADER_ROOTS = ("/tests", "/logs/verifier")

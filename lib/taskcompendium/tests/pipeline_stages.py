@@ -14,6 +14,7 @@ import pyarrow.parquet as pq
 from shellbox.backends.docker.machine import DockerMachineFactory
 from shellbox.backends.shellsim.machine import ShellSimMachineFactory
 from shellbox.machine import Backend, DockerImage, Machine, MachineFactory, MachineSpec, PackageSpec
+from shellbox.tiers import Tier
 
 from taskcompendium.convert.answers import numeric_answer_task, source_defect
 from taskcompendium.models import (
@@ -21,6 +22,7 @@ from taskcompendium.models import (
     EnvironmentRequirements,
     ExecutionRequirements,
     ExitCodeReward,
+    MachineRoute,
     ScriptGrader,
     Source,
     TaskSpec,
@@ -222,6 +224,10 @@ class FixtureGradingMachines:
     def identity(self) -> dict[str, Any]:
         return {"backend": "fixture", "network": "deny"}
 
-    def machine(self, environment: EnvironmentRequirements, memory_mb: int) -> tuple[MachineFactory, MachineSpec]:
+    def routes(self, environment: EnvironmentRequirements, memory_mb: int) -> tuple[MachineRoute, ...]:
         assert environment.docker_image is not None
-        return self.factory, MachineSpec(DockerImage(environment.docker_image), memory_mb=memory_mb)
+        return (
+            MachineRoute(
+                Tier.DAYTONA, self.factory, MachineSpec(DockerImage(environment.docker_image), memory_mb=memory_mb)
+            ),
+        )

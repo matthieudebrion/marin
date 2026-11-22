@@ -4,7 +4,6 @@
 """The tier table routes declared requirements to satisfying tiers, cheapest first."""
 
 import pytest
-
 from shellbox.machine import CommandSemantics, NetworkPolicy, PackageSpec
 from shellbox.tiers import DeclaredSource, TaskRequirements, Tier, route_tiers
 

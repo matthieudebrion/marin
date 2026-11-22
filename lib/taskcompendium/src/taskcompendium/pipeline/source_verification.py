@@ -37,6 +37,7 @@ from taskcompendium.pipeline.models import (
     CheckStatus,
     CheckSuite,
     GraderReadiness,
+    TierVerdict,
     VerificationReport,
 )
 from taskcompendium.pipeline.sampling import merge_sample_rows, seeded_order, seeded_sample
@@ -93,6 +94,10 @@ class VerificationTrial(BaseModel):
     status: CheckStatus
     checks: list[CheckResult]
     rollouts: tuple[RolloutRecord, ...]
+    verdicts: tuple[TierVerdict, ...] = ()
+    """Every tier the controls tried, in order, with each tier's outcome."""
+    route_tier: str | None = None
+    """The task machine's route tier when the controls passed through an oracle machine."""
 
 
 class TrialEvidence(BaseModel):
@@ -379,9 +384,22 @@ def _verify_sample_with_evidence(
             metrics.update_counter("verification/infra_error_retries", 1)
         for check in report.checks:
             metrics.update_counter(f"verification/control/{check.check}/{check.status.value}", 1)
+        for verdict in report.verdicts:
+            metrics.update_counter(f"verification/tier/{verdict.tier}/{verdict.status.value}", 1)
         status = _trial_status(report.checks)
         metrics.update_counter(f"verification/trial/{status.value}", 1)
-        trials.append(VerificationTrial(attempt=attempt, status=status, checks=report.checks, rollouts=report.rollouts))
+        if report.route_tier is not None:
+            metrics.update_counter(f"verification/route/{report.route_tier}", 1)
+        trials.append(
+            VerificationTrial(
+                attempt=attempt,
+                status=status,
+                checks=report.checks,
+                rollouts=report.rollouts,
+                verdicts=report.verdicts,
+                route_tier=report.route_tier,
+            )
+        )
         evidence.append(
             TrialEvidence(
                 task_id=task.id,

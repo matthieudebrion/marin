@@ -153,7 +153,7 @@ def _declared_source_route(requirements: TaskRequirements) -> tuple[Tier, ...]:
         return (Tier.LOCAL,)
     if source is DeclaredSource.PACKAGE_SPEC:
         simulator = semantics is CommandSemantics.SHELL_SIMULATOR
-        return ((Tier.SHELLSIM,) if simulator else (Tier.LOCAL,))
+        return (Tier.SHELLSIM,) if simulator else (Tier.LOCAL,)
     return (Tier.SHELLSIM,) if semantics is CommandSemantics.SHELL_SIMULATOR else ()
 
 

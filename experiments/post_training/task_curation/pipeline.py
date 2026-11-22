@@ -48,8 +48,9 @@ from shellbox.machine import (
     PackageSpec,
     UnsupportedMachineSpec,
 )
+from shellbox.tiers import Tier, route_tiers
 from taskcompendium.identity import canonical_sha256
-from taskcompendium.models import CommandSemantics, EnvironmentRequirements, require_resolved_environment
+from taskcompendium.models import CommandSemantics, EnvironmentRequirements, MachineRoute, require_resolved_environment
 from taskcompendium.pipeline.controls import GradingMachines, controls_identity
 from taskcompendium.pipeline.fingerprints import callable_identity, recipe_code_identity
 from taskcompendium.pipeline.inputs import ConversionContext, FileParts, SourceFileOverride, SourceFiles, SourceFormat
@@ -77,6 +78,7 @@ from taskcompendium.pipeline.source_verification import SOURCE_VERIFICATION_REVI
 from taskcompendium.pipeline.sources import conversion_shards, source_files_identity, staged_files
 from taskcompendium.pipeline.stages import AuditExecution, ReviewConfig, ReviewMode
 from taskcompendium.pipeline.static_retention import NoOracleSourceContext
+from taskcompendium.runtime.environment import task_requirements
 from taskcompendium.runtime.local import LOCK_FILE, LocalGraderMachines
 from zephyr.context import ZephyrContext
 from zephyr.dataset import Dataset
@@ -318,23 +320,44 @@ class CampaignMachines:
             "network": NetworkPolicy.DENY.value,
         }
 
-    def machine(self, environment: EnvironmentRequirements, memory_mb: int) -> tuple[MachineFactory, MachineSpec]:
+    def routes(self, environment: EnvironmentRequirements, memory_mb: int) -> tuple[MachineRoute, ...]:
+        """The tier candidates for one environment, cheapest first, with network access denied.
+
+        Tiers this deployment cannot serve are absent, so the ladder tries only
+        tiers that can construct a machine here.
+        """
         require_resolved_environment(environment)
-        if environment.command_semantics == CommandSemantics.SHELL_SIMULATOR:
-            packages = environment.package_spec or PackageSpec()
-            return self._simulator_factory, MachineSpec(packages, network=NetworkPolicy.DENY, memory_mb=memory_mb)
-        if environment.packages_lock is not None or environment.package_spec is not None:
-            return self.local.machine(environment, memory_mb)
-        if environment.docker_image is None:
-            raise UnsupportedMachineSpec("Native campaign execution requires a pinned image or package lock")
-        if self.image_factory is None:
-            raise UnsupportedMachineSpec("Image controls require a supplied image factory or --image-backend")
-        return self.image_factory, MachineSpec(
-            RegistryImage(environment.docker_image),
-            network=NetworkPolicy.DENY,
-            memory_mb=memory_mb,
-            cpus=self.image_cpus,
-        )
+        requirements = task_requirements(environment, NetworkPolicy.DENY)
+        routes: list[MachineRoute] = []
+        for tier in route_tiers(requirements):
+            match tier:
+                case Tier.SHELLSIM:
+                    packages = environment.package_spec or PackageSpec()
+                    routes.append(
+                        MachineRoute(
+                            tier,
+                            self._simulator_factory,
+                            MachineSpec(packages, network=NetworkPolicy.DENY, memory_mb=memory_mb),
+                        )
+                    )
+                case Tier.LOCAL:
+                    routes.extend(self.local.routes(environment, memory_mb))
+                case Tier.DAYTONA:
+                    if self.image_factory is None:
+                        continue
+                    routes.append(
+                        MachineRoute(
+                            tier,
+                            self.image_factory,
+                            MachineSpec(
+                                RegistryImage(environment.docker_image),
+                                network=NetworkPolicy.DENY,
+                                memory_mb=memory_mb,
+                                cpus=self.image_cpus,
+                            ),
+                        )
+                    )
+        return tuple(routes)
 
 
 def _reviewer(

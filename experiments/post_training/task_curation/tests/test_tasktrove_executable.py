@@ -20,16 +20,17 @@ from shellbox.machine import (
     DockerImage,
     ExecutionRequirements,
     ExitReason,
-    MachineFactory,
     MachineSpec,
     Result,
     UnsupportedMachineSpec,
 )
+from shellbox.tiers import Tier
 from taskcompendium.models import (
     CommandSemantics,
     ConversationTrace,
     EnvironmentRequirements,
     GradingAttempt,
+    MachineRoute,
     Source,
     TaskSpec,
     TextMessage,
@@ -201,9 +202,12 @@ class ControlMachines:
     def identity(self) -> dict:
         return {"backend": "fixture"}
 
-    def machine(self, environment: EnvironmentRequirements, memory_mb: int) -> tuple[MachineFactory, MachineSpec]:
+    def routes(self, environment: EnvironmentRequirements, memory_mb: int) -> tuple[MachineRoute, ...]:
         assert environment.docker_image is not None
-        return self.factory, MachineSpec(DockerImage(environment.docker_image), memory_mb=memory_mb)
+        tier = Tier.SHELLSIM if self.factory.backend == Backend.SHELLSIM else Tier.DAYTONA
+        return (
+            MachineRoute(tier, self.factory, MachineSpec(DockerImage(environment.docker_image), memory_mb=memory_mb)),
+        )
 
 
 def without_oracle(task: TaskSpec) -> TaskSpec:
@@ -296,8 +300,9 @@ async def test_agent_machine_rejects_incompatible_command_semantics_before_start
 
 def test_grader_controls_reject_simulation_of_linux_processes_before_start(executable_task):
     machines = ControlMachines(factory=GradingMachines(backend=Backend.SHELLSIM))
-    with pytest.raises(UnsupportedMachineSpec):
-        run_controls(executable_task, controls=CONTROLS, machines=machines)
+    report = run_controls(executable_task, controls=CONTROLS, machines=machines)
+    assert {check.check: check.status for check in report.checks} == {"golden": CheckStatus.UNSUPPORTED}
+    assert [verdict.tier for verdict in report.verdicts] == ["shellsim"]
     assert not machines.factory.machines
 
 

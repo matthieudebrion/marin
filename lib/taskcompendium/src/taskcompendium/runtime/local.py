@@ -32,8 +32,14 @@ from shellbox.backends.local.python_environment import (
     build_python_environment,
 )
 from shellbox.machine import Backend, HostImage, MachineFactory, MachineSpec, Mount, NetworkPolicy
+from shellbox.tiers import Tier
 
-from taskcompendium.models import DEFAULT_WORKSPACE, EnvironmentRequirements, require_resolved_environment
+from taskcompendium.models import (
+    DEFAULT_WORKSPACE,
+    EnvironmentRequirements,
+    MachineRoute,
+    require_resolved_environment,
+)
 
 RUNTIME_PACKAGES = (Path(verifyit.__file__).parent,)
 LOCK_FILE = "requirements.lock"
@@ -247,10 +253,13 @@ class LocalGraderMachines:
     def identity(self) -> dict[str, Any]:
         return {"backend": Backend.LOCAL.value, "python": DEFAULT_PYTHON_VERSION}
 
-    def machine(self, environment: EnvironmentRequirements, memory_mb: int) -> tuple[MachineFactory, MachineSpec]:
-        """Return an unprepared bubblewrap spec; ``memory_mb`` is advisory."""
+    def routes(self, environment: EnvironmentRequirements, memory_mb: int) -> tuple[MachineRoute, ...]:
+        """The single local candidate for a declared package spec or lock; no candidate otherwise.
+
+        ``memory_mb`` is advisory. This deployment stages local packages, not local images.
+        """
         require_resolved_environment(environment)
         if environment.packages_lock is None and environment.package_spec is None:
-            raise ValueError("A local grader requires a package spec or packages lock")
+            return ()
         spec = MachineSpec(HostImage(), network=NetworkPolicy.DENY, workdir=DEFAULT_WORKSPACE)
-        return local_factory(), spec
+        return (MachineRoute(Tier.LOCAL, local_factory(), spec),)

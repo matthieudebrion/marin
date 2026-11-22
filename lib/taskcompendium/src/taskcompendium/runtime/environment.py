@@ -13,14 +13,32 @@ from shellbox.machine import (
     HostImage,
     MachineFactory,
     MachineSpec,
+    NetworkPolicy,
     UnsupportedMachineSpec,
 )
+from shellbox.tiers import TaskRequirements
 
 from taskcompendium.models import EnvironmentRequirements, require_resolved_environment
 from taskcompendium.runtime.docker_build import require_original_docker_build
 from taskcompendium.runtime.local import local_runtime
 
 _TEMPLATE_PATTERN = re.compile(r"\$\{([^}:]+)(?::-(.*))?\}")
+
+
+def task_requirements(environment: EnvironmentRequirements, network: NetworkPolicy) -> TaskRequirements:
+    """The declared requirements as the tier table reads them.
+
+    ``network`` is the machine's network policy; no task spec declares one, so the
+    caller states the policy its deployment uses.
+    """
+    return TaskRequirements(
+        command_semantics=environment.command_semantics,
+        capabilities=environment.capabilities,
+        network=network,
+        docker_image=environment.docker_image,
+        packages_lock=environment.packages_lock,
+        package_spec=environment.package_spec,
+    )
 
 
 def setup_user(backend: Backend) -> str | None:

@@ -15,12 +15,14 @@ from shellbox.machine import (
     Backend,
     Command,
     DockerImage,
+    ExitReason,
     Machine,
     MachineSpec,
     PackageSpec,
     Result,
     UnsupportedMachineSpec,
 )
+from shellbox.tiers import Tier
 from verifyit.spec import SchemaFormat
 
 from taskcompendium.convert.answers import (
@@ -36,6 +38,7 @@ from taskcompendium.models import (
     EnvironmentRequirements,
     FileReward,
     JsonValueAnswer,
+    MachineRoute,
     NoGrader,
     PlainText,
     ResourceGroups,
@@ -272,10 +275,18 @@ def test_oracle_runs_in_the_agent_image_and_otherwise_in_the_grader_image(agent_
 class OracleMachines(FixtureGradingMachines):
     """Provide image machines and a simulator, leaving lock preparation unsupported."""
 
-    def machine(self, environment: EnvironmentRequirements, memory_mb: int):
+    def routes(self, environment: EnvironmentRequirements, memory_mb: int):
         if environment.command_semantics == CommandSemantics.SHELL_SIMULATOR:
-            return ShellSimMachineFactory(), MachineSpec(PackageSpec(), memory_mb=memory_mb)
-        return self.factory, MachineSpec(DockerImage(environment.docker_image or GRADER_IMAGE), memory_mb=memory_mb)
+            return (
+                MachineRoute(Tier.SHELLSIM, ShellSimMachineFactory(), MachineSpec(PackageSpec(), memory_mb=memory_mb)),
+            )
+        return (
+            MachineRoute(
+                Tier.DAYTONA,
+                self.factory,
+                MachineSpec(DockerImage(environment.docker_image or GRADER_IMAGE), memory_mb=memory_mb),
+            ),
+        )
 
 
 def test_oracle_uses_simulator_directory_and_setup_before_native_grading(monkeypatch):
@@ -294,6 +305,97 @@ def test_oracle_uses_simulator_directory_and_setup_before_native_grading(monkeyp
         golden=lambda _: OracleCommand('test "$PWD" = /agent && cat ready.txt > answer.out', answer_file="answer.out")
     )
     assert checks(task, controls, OracleMachines()) == {"golden": PASS}
+
+
+@dataclass(eq=False)
+class FailingOracleMachine:
+    """A machine that stages files but refuses every oracle command."""
+
+    async def run(self, command: Command) -> Result:
+        if command.argv[:1] == ("/bin/bash",):
+            return Result(1, b"", b"the oracle is missing", False, False, ExitReason.EXITED)
+        return Result(0, b"", b"", False, False, ExitReason.EXITED)
+
+    async def upload(self, source, target) -> None:
+        return
+
+    async def download(self, source, target) -> None:
+        raise RuntimeError("No files exist on this machine")
+
+    async def close(self) -> None:
+        return
+
+
+@dataclass(eq=False)
+class FailingOracleFactory:
+    """A machine factory whose machines refuse every oracle command."""
+
+    backend: Backend = Backend.DAYTONA
+
+    def check_environment(self, requirements, spec) -> None:
+        return
+
+    async def create(self, spec: MachineSpec) -> FailingOracleMachine:
+        return FailingOracleMachine()
+
+
+class RefusingThenImageMachines(FixtureGradingMachines):
+    """A task ladder whose cheapest tier refuses the requirements and whose next tier serves the oracle."""
+
+    def routes(self, environment: EnvironmentRequirements, memory_mb: int) -> tuple[MachineRoute, ...]:
+        refusing = MachineRoute(Tier.SHELLSIM, ShellSimMachineFactory(), MachineSpec(PackageSpec(), memory_mb=memory_mb))
+        return (refusing, *super().routes(environment, memory_mb))
+
+
+class FailingThenImageMachines(FixtureGradingMachines):
+    """A task ladder whose cheapest tier fails the oracle and whose next tier serves it."""
+
+    def routes(self, environment: EnvironmentRequirements, memory_mb: int) -> tuple[MachineRoute, ...]:
+        routes = super().routes(environment, memory_mb)
+        if environment.docker_image != AGENT_IMAGE:
+            return routes
+        failing = MachineRoute(Tier.SHELLSIM, FailingOracleFactory(), MachineSpec(PackageSpec(), memory_mb=memory_mb))
+        return (failing, *routes)
+
+
+@pytest.mark.parametrize(
+    "machines,refusal_status,verifier_refusal",
+    [
+        (RefusingThenImageMachines, "unsupported", ("verifier", "shellsim", "unsupported")),
+        (FailingThenImageMachines, "fail", None),
+    ],
+    ids=["refusing_tier", "failing_tier"],
+)
+def test_oracle_fails_up_from_a_tier_that_cannot_serve_it(machines, refusal_status, verifier_refusal):
+    task = file_task()
+    requirements = EnvironmentRequirements(command_semantics=CommandSemantics.LINUX_PROCESS, docker_image=AGENT_IMAGE)
+    task = TaskSpec.model_validate(task.model_copy(update={"environment_requirements": requirements}).model_dump())
+    images = RecordingImages()
+    report = control_suite(Controls(golden=lambda _: OracleCommand("bash /solution/solve.sh")), machines(images)).run(
+        task
+    )
+    assert {check.check: check.status for check in report.checks} == {"golden": PASS}
+    assert report.route_tier == "daytona"
+    # The task machine's ladder fails up; the grader machine's ladder serves where it can.
+    assert [(verdict.role.value, verdict.tier, verdict.status.value) for verdict in report.verdicts] == [
+        ("task", "shellsim", refusal_status),
+        ("task", "daytona", "pass"),
+        *((verifier_refusal,) if verifier_refusal is not None else ()),
+        ("verifier", "daytona", "pass"),
+    ]
+    oracles = [machine for machine in images.created if "/solution/solve.sh" in machine.uploads]
+    assert [machine.image for machine in oracles] == [AGENT_IMAGE]
+
+
+def test_control_failure_on_the_top_satisfying_tier_is_the_final_verdict():
+    task = file_task()
+    requirements = EnvironmentRequirements(command_semantics=CommandSemantics.LINUX_PROCESS, docker_image=AGENT_IMAGE)
+    task = TaskSpec.model_validate(task.model_copy(update={"environment_requirements": requirements}).model_dump())
+    report = control_suite(
+        Controls(golden=lambda _: OracleCommand("bash /solution/solve.sh")),
+        FailingThenImageMachines(UnavailableImages()),
+    ).run(task)
+    assert {check.check: check.status for check in report.checks} == {"golden": CheckStatus.INFRA_ERROR}
 
 
 def test_local_oracle_and_grader_setup_run_without_changing_host_user(local_machine_environment):
@@ -330,8 +432,9 @@ def test_lock_backed_oracle_rejects_image_only_provider_before_acquisition():
     )
     images = RecordingImages()
     suite = control_suite(Controls(golden=lambda _: OracleCommand("bash /solution/solve.sh")), OracleMachines(images))
-    with pytest.raises(UnsupportedMachineSpec):
-        suite.run(task)
+    report = suite.run(task)
+    assert {check.check: check.status for check in report.checks} == {"golden": CheckStatus.UNSUPPORTED}
+    assert [verdict.tier for verdict in report.verdicts] == ["daytona"]
     assert images.created == []
 
 

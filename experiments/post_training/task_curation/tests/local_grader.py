@@ -30,8 +30,16 @@ from shellbox.machine import (
     HostImage,
     MachineSpec,
 )
+from shellbox.tiers import Tier
 from taskcompendium.grading_result import GradeResult
-from taskcompendium.models import ConversationTrace, EnvironmentRequirements, GradingAttempt, TaskResource, TaskSpec
+from taskcompendium.models import (
+    ConversationTrace,
+    EnvironmentRequirements,
+    GradingAttempt,
+    MachineRoute,
+    TaskResource,
+    TaskSpec,
+)
 from taskcompendium.pipeline.controls import FILE_SUBMISSION_MESSAGE
 from taskcompendium.pipeline.models import Reply, WorkspaceFiles
 from taskcompendium.runtime.task_grading import sandbox_grade
@@ -68,12 +76,22 @@ class LocalGraderMachines:
     def identity(self) -> dict:
         return {"backend": Backend.DOCKER.value, "image": self.image}
 
-    def machine(self, environment: EnvironmentRequirements, memory_mb: int) -> tuple[LocalGraderFactory, MachineSpec]:
+    def routes(self, environment: EnvironmentRequirements, memory_mb: int) -> tuple[MachineRoute, ...]:
         if environment.packages_lock is not None:
-            return LocalGraderFactory(Backend.LOCAL, self.image), MachineSpec(HostImage(), memory_mb=memory_mb)
+            return (
+                MachineRoute(
+                    Tier.LOCAL,
+                    LocalGraderFactory(Backend.LOCAL, self.image),
+                    MachineSpec(HostImage(), memory_mb=memory_mb),
+                ),
+            )
         assert environment.docker_image is not None
-        return LocalGraderFactory(Backend.DOCKER, self.image), MachineSpec(
-            DockerImage(environment.docker_image), memory_mb=memory_mb
+        return (
+            MachineRoute(
+                Tier.DAYTONA,
+                LocalGraderFactory(Backend.DOCKER, self.image),
+                MachineSpec(DockerImage(environment.docker_image), memory_mb=memory_mb),
+            ),
         )
 
 

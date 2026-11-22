@@ -215,10 +215,30 @@ class CheckResult(BaseModel):
     detail: str
 
 
+class TierRole(StrEnum):
+    """Which machine of a task a tier verdict describes."""
+
+    TASK = "task"
+    VERIFIER = "verifier"
+
+
+class TierVerdict(BaseModel):
+    """One tier's control outcome: the machine role, the tier and what happened there."""
+
+    model_config = ConfigDict(frozen=True, extra="forbid")
+    role: TierRole
+    tier: str
+    status: CheckStatus
+    detail: str
+
+
 @dataclass(frozen=True)
 class VerificationReport:
     checks: list[CheckResult]
     rollouts: tuple[RolloutRecord, ...] = ()
+    verdicts: tuple[TierVerdict, ...] = ()
+    route_tier: str | None = None
+    """The recorded task-machine route tier: the cheapest tier where the controls passed."""
 
 
 @dataclass(frozen=True)
