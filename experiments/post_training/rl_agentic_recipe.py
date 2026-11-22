@@ -135,7 +135,6 @@ TIER_MACHINES = {
         startup_timeout=TASK_MACHINE_STARTUP_TIMEOUT,
         cleanup_timeout=TASK_MACHINE_CLEANUP_TIMEOUT,
     ),
-    # Linux task machines and image graders are training work, so they use the RL organization.
     Tier.DAYTONA: MachineRuntimeSpec(
         backend=Backend.DAYTONA,
         network=NetworkPolicy.ALLOW,
@@ -151,6 +150,7 @@ TIER_MACHINES = {
 _SHELL_TOOL_RECIPE = RecipePatch(
     environment=sections.Environment(
         task_sessions={
+            # Linux task machines and image graders are training work, so they use the RL organization.
             "daytona": {"api_key_env": _DAYTONA_RL_KEY, "ttl_minutes": 60},
             "task_spec": {
                 "session": {"max_turns": TOOL_TURNS},

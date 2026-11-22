@@ -206,7 +206,7 @@ def _tier_machine(
     says, since the router only admits tiers that serve ALLOW.
     """
     if requirements.command_semantics is None or not machines_by_tier:
-        # A task without declared semantics is machine-less: today's lowering binds no machine.
+        # A task without declared semantics is machine-less: the lowering binds no machine for it.
         return None
     needs_network = "network" in requirements.capabilities
     tier_requirements = task_requirements(

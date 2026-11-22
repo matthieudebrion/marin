@@ -19,18 +19,23 @@ from pathlib import Path
 import pytest
 import tomli_w
 from shellbox.backends.docker.machine import DockerMachineFactory
+from shellbox.backends.local.machine import check_local_environment
 from shellbox.backends.shellsim.machine import ShellSimMachineFactory
+from shellbox.image import RegistryImage
 from shellbox.machine import (
     Backend,
     Command,
     DockerImage,
+    ExecutionRequirements,
     ExitReason,
     HostImage,
     MachineSpec,
+    NetworkPolicy,
     PackageSpec,
     Result,
     UnsupportedMachineSpec,
 )
+from shellbox.tiers import Tier
 from verifyit.modes.grade_judge import JudgeConnection, JudgeEndpointLocation
 from verifyit.spec import (
     RUBRIC_LABELS,
@@ -78,8 +83,10 @@ from taskcompendium.pipeline.controls import _oracle_attempt
 from taskcompendium.pipeline.inputs import ConversionContext
 from taskcompendium.pipeline.models import CheckStatus, OracleCommand, RawRow
 from taskcompendium.pipeline.verification import verify_task
+from taskcompendium.runtime.environment import validate_machine_spec
 from taskcompendium.runtime.episode import ScriptedActor, run_episode
 from taskcompendium.runtime.grading import STAGING_ARCHIVE, grade_empty_in_sandbox, grade_in_sandbox
+from taskcompendium.runtime.local import LocalGraderMachines
 from taskcompendium.runtime.models import RuntimeEvidence, Termination, grading_attempt
 from taskcompendium.runtime.resources import inline_resource
 from taskcompendium.runtime.shell import (
@@ -1053,3 +1060,33 @@ async def test_native_script_judge_transport(tmp_path, script_grading_task, judg
     expected_client = "python-httpx/" if host_endpoint else "Python-urllib"
     assert judge_server.request_headers[-1]["User-Agent"].startswith(expected_client)
     assert all("host-only-key" not in machine.env.values() and machine.closed for machine in factories.machines)
+
+
+@dataclass(eq=False)
+class AdmissionLocalFactory:
+    """The local factory's admission checks without constructing a Linux sandbox."""
+
+    backend = Backend.LOCAL
+
+    def check_environment(self, requirements: ExecutionRequirements, spec: MachineSpec) -> None:
+        check_local_environment(requirements, spec)
+
+
+def _admission_local_factory() -> AdmissionLocalFactory:
+    return AdmissionLocalFactory()
+
+
+def test_local_routes_serve_a_digest_pinned_image(monkeypatch):
+    monkeypatch.setattr("taskcompendium.runtime.local.local_factory", _admission_local_factory)
+    environment = EnvironmentRequirements(
+        command_semantics=CommandSemantics.LINUX_PROCESS,
+        capabilities=("shell", "filesystem"),
+        docker_image="ghcr.io/example/task@sha256:" + "0" * 64,
+        working_directory="/app",
+    )
+    (route,) = LocalGraderMachines().routes(environment, 2048)
+    assert route.tier is Tier.LOCAL
+    assert route.spec.source == RegistryImage("ghcr.io/example/task@sha256:" + "0" * 64)
+    assert (route.spec.workdir, route.spec.network) == ("/app", NetworkPolicy.DENY)
+    # Admission only: the local factory accepts the pinned image before any staging.
+    validate_machine_spec(environment, route.factory, route.spec)

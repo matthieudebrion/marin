@@ -11,8 +11,8 @@ cheapest satisfying tier and fails up on control failure, recording the first ti
 where both pass as the task's route; RL runs each task on its recorded route tier.
 A ``shell_simulator`` task may run on a ``linux_process`` tier, because its
 capabilities are a subset of Linux's; a ``linux_process`` task never runs on ShellSim.
-A spec that omits its capabilities keeps today's route: the single tier its declared
-source requires, with the full Linux capability set assumed.
+A spec that omits its capabilities routes by its declared source alone: the single
+tier that source requires, with the full Linux capability set assumed.
 """
 
 from dataclasses import dataclass
@@ -21,6 +21,7 @@ from enum import StrEnum
 from shellbox.image import is_digest_pinned_image
 from shellbox.machine import (
     LINUX_PROCESS_CAPABILITIES,
+    NETWORK_CAPABILITY,
     SHELL_SIMULATOR_CAPABILITIES,
     CommandSemantics,
     NetworkPolicy,
@@ -131,12 +132,13 @@ TIER_TABLE: tuple[TierDefinition, ...] = (
 
 
 def _declared_source_route(requirements: TaskRequirements) -> tuple[Tier, ...]:
-    """The tier the declared source requires, as specs route today.
+    """The declared-source route: the single tier the spec's declared source requires.
 
-    A spec that omits its capabilities keeps today's route: one tier, chosen by its
-    declared source with the full Linux capability set assumed. Fail-up needs a task
-    to declare what it actually requires. A task with no declared source runs on the
-    simulator's default packages, or is unsupported.
+    A spec that omits its capabilities routes by its declared source alone, with the
+    full Linux capability set assumed — the route every published cohort took before
+    the tier table existed. Fail-up needs a task to declare what it actually
+    requires. A task with no declared source runs on the simulator's default
+    packages, or is unsupported.
     """
     semantics = requirements.command_semantics
     assert semantics is not None
@@ -163,7 +165,7 @@ def satisfies(definition: TierDefinition, requirements: TaskRequirements) -> boo
         return False
     if not set(requirements.capabilities) <= definition.capabilities:
         return False
-    if "network" in requirements.capabilities and requirements.network is NetworkPolicy.DENY:
+    if NETWORK_CAPABILITY in requirements.capabilities and requirements.network is NetworkPolicy.DENY:
         # No tier runs a network-capable task with denied networking, matching every backend check.
         return False
     if requirements.network not in definition.network:
@@ -180,10 +182,10 @@ def route_tiers(requirements: TaskRequirements) -> tuple[Tier, ...]:
     """The ordered tiers that satisfy the declared requirements, cheapest first.
 
     Empty means no tier in the table satisfies the requirements: an unsupported
-    task, not an error. A spec that omits its capabilities keeps today's route:
-    the single tier its declared source requires, with the full Linux capability
-    set assumed — no cheaper tier is tried. Callers gate machine-less tasks and
-    resolve Docker build contexts before routing.
+    task, not an error. A spec that omits its capabilities routes by its declared
+    source alone — the single tier that source requires, with the full Linux
+    capability set assumed; no cheaper tier is tried. Callers gate machine-less
+    tasks and resolve Docker build contexts before routing.
     """
     if requirements.command_semantics is None:
         raise ValueError("A task without declared command semantics has no machine to route")

@@ -56,8 +56,11 @@ class CommandSemantics(StrEnum):
     SHELL_SIMULATOR = "shell_simulator"
 
 
+NETWORK_CAPABILITY = "network"
+"""The capability that requires a machine whose network policy allows external traffic."""
+
 SHELL_SIMULATOR_CAPABILITIES = frozenset({"shell", "filesystem", "python"})
-LINUX_PROCESS_CAPABILITIES = SHELL_SIMULATOR_CAPABILITIES | {"process", "network", "git_repository"}
+LINUX_PROCESS_CAPABILITIES = SHELL_SIMULATOR_CAPABILITIES | {"process", NETWORK_CAPABILITY, "git_repository"}
 
 
 class ExecutionRequirements(Protocol):
@@ -242,7 +245,7 @@ def check_execution_requirements(
     unsupported = set(requirements.capabilities) - capabilities
     if unsupported:
         raise UnsupportedMachineSpec(f"Unsupported capabilities: {', '.join(sorted(unsupported))}")
-    if "network" in requirements.capabilities and spec.network == NetworkPolicy.DENY:
+    if NETWORK_CAPABILITY in requirements.capabilities and spec.network == NetworkPolicy.DENY:
         raise UnsupportedMachineSpec("Network capability requires an allow network policy")
     if requirements.docker_image is not None and requirements.docker_image != image_reference:
         raise UnsupportedMachineSpec("Machine must use the task's required image")

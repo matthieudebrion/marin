@@ -116,7 +116,8 @@ def grade(
         attempt = GradingAttempt(trace, dict(submission.files))
     environment = task.grader.environment
     assert environment is not None
-    return asyncio.run(sandbox_grade(task, attempt, *machines.machine(environment, memory_mb)))
+    route = machines.routes(environment, memory_mb)[0]
+    return asyncio.run(sandbox_grade(task, attempt, route.factory, route.spec))
 
 
 def with_verifier_file(task: TaskSpec, replacement: TaskResource) -> TaskSpec:

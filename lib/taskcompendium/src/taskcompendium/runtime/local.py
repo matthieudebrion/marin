@@ -31,6 +31,7 @@ from shellbox.backends.local.python_environment import (
     PythonEnvironment,
     build_python_environment,
 )
+from shellbox.image import RegistryImage, is_digest_pinned_image
 from shellbox.machine import Backend, HostImage, MachineFactory, MachineSpec, Mount, NetworkPolicy
 from shellbox.tiers import Tier
 
@@ -254,11 +255,27 @@ class LocalGraderMachines:
         return {"backend": Backend.LOCAL.value, "python": DEFAULT_PYTHON_VERSION}
 
     def routes(self, environment: EnvironmentRequirements, memory_mb: int) -> tuple[MachineRoute, ...]:
-        """The single local candidate for a declared package spec or lock; no candidate otherwise.
+        """The single local candidate for declared packages or a digest-pinned image; no candidate otherwise.
 
-        ``memory_mb`` is advisory. This deployment stages local packages, not local images.
+        ``memory_mb`` is advisory. An image machine stages the pinned registry
+        reference through the local image cache; an unpinned reference has no
+        candidate here because the staging could never reproduce it.
         """
         require_resolved_environment(environment)
+        if environment.docker_image is not None:
+            if not is_digest_pinned_image(environment.docker_image):
+                return ()
+            return (
+                MachineRoute(
+                    Tier.LOCAL,
+                    local_factory(),
+                    MachineSpec(
+                        RegistryImage(environment.docker_image),
+                        network=NetworkPolicy.DENY,
+                        workdir=environment.working_directory or DEFAULT_WORKSPACE,
+                    ),
+                ),
+            )
         if environment.packages_lock is None and environment.package_spec is None:
             return ()
         spec = MachineSpec(HostImage(), network=NetworkPolicy.DENY, workdir=DEFAULT_WORKSPACE)

@@ -37,6 +37,7 @@ from taskcompendium.pipeline.models import (
     CheckStatus,
     CheckSuite,
     GraderReadiness,
+    Tier,
     TierVerdict,
     VerificationReport,
 )
@@ -96,7 +97,7 @@ class VerificationTrial(BaseModel):
     rollouts: tuple[RolloutRecord, ...]
     verdicts: tuple[TierVerdict, ...] = ()
     """Every tier the controls tried, in order, with each tier's outcome."""
-    route_tier: str | None = None
+    route_tier: Tier | None = None
     """The task machine's route tier when the controls passed through an oracle machine."""
 
 

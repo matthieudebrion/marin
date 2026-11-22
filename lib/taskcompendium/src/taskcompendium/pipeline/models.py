@@ -10,6 +10,7 @@ from typing import Any
 
 from finestore.rl.curation import Confidence, Defect, ReferenceStatus
 from pydantic import BaseModel, ConfigDict, Field
+from shellbox.tiers import Tier
 
 from taskcompendium.models import AssistantToolCalls, EnvironmentRequirements, Source, TaskSpec, TextMessage
 from taskcompendium.pipeline.inputs import ConversionContext, SourceFiles
@@ -227,7 +228,7 @@ class TierVerdict(BaseModel):
 
     model_config = ConfigDict(frozen=True, extra="forbid")
     role: TierRole
-    tier: str
+    tier: Tier
     status: CheckStatus
     detail: str
 
@@ -237,7 +238,7 @@ class VerificationReport:
     checks: list[CheckResult]
     rollouts: tuple[RolloutRecord, ...] = ()
     verdicts: tuple[TierVerdict, ...] = ()
-    route_tier: str | None = None
+    route_tier: Tier | None = None
     """The recorded task-machine route tier: the cheapest tier where the controls passed."""
 
 
